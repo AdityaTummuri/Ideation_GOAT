@@ -1,68 +1,112 @@
-import { ToolDecorator as Tool, z, ExecutionContext, McpApp, Module } from '@nitrostack/core';
-import { spawn } from 'child_process';
-import * as path from 'path';
+import {
+  ToolDecorator as Tool,
+  ResourceDecorator as Resource,
+  z,
+  ExecutionContext,
+  McpApp,
+  Module
+} from '@nitrostack/core';
 
-/**
- * Executes a tool function against the underlying Python core backend engine.
- * Spawns an asynchronous Python process and retrieves the output.
- */
-async function runPythonTool(toolName: string, args: Record<string, any>): Promise<any> {
-  return new Promise((resolve, reject) => {
-    const pythonCode = `
-import asyncio
-import json
-import sys
-import os
+import { CrossDomainSearchEngine } from './search_engine.js';
+import { ProjectScaffolder } from './scaffolder.js';
+import { WorkspaceAnalyzer } from './workspace_analyzer.js';
+import { RepoProfiler } from './repo_profiler.js';
+import { WorkflowOrchestrator } from './orchestrator.js';
 
-# Add root directory to path to locate server.py
-sys.path.insert(0, os.getcwd())
+// Modular analyzer imports
+import { analyzeWorkspace as analyze_workspace } from './analyzers/workspace_analyzer.js';
+import { analyzeRepoHealth as analyze_repo_health } from './analyzers/health_analyzer.js';
+import { checkEcosystemLockin as run_lockin_profiler } from './analyzers/lockin_profiler.js';
+import { analyzeRepoBugs as run_bug_profiler } from './analyzers/bug_profiler.js';
+import { forecastDeploymentCosts } from './analyzers/cost_forecaster.js';
+import { healParameterSchema } from './analyzers/schema_healer.js';
+import { verifySandboxIdentity } from './analyzers/identity_sandbox.js';
+import { profileWorkspaceDi } from './analyzers/di_profiler.js';
+import { scanWorkspaceSecurityCves } from './analyzers/cve_shield.js';
 
-from server import ${toolName}
-
-async def main():
-    try:
-        args = json.loads(sys.argv[1])
-        res = await ${toolName}(**args)
-        print(json.dumps(res))
-    except Exception as e:
-        print(json.dumps({"status": "error", "message": str(e)}))
-
-asyncio.run(main())
-`;
-    // Spawn python3 child process
-    const child = spawn('python3', ['-c', pythonCode, JSON.stringify(args)], {
-      cwd: process.cwd(),
-      env: process.env
-    });
-
-    let stdout = '';
-    let stderr = '';
-
-    child.stdout.on('data', (data) => {
-      stdout += data;
-    });
-
-    child.stderr.on('data', (data) => {
-      stderr += data;
-    });
-
-    child.on('close', (code) => {
-      if (code !== 0) {
-        reject(new Error(`Python process exited with code ${code}. Stderr: ${stderr}`));
-        return;
-      }
-      try {
-        const parsed = JSON.parse(stdout.trim());
-        resolve(parsed);
-      } catch (err) {
-        resolve(stdout.trim());
-      }
-    });
-  });
-}
+// In-memory session cache for get_metaphor_canvas
+let lastSearch = {
+  query: '',
+  mode: '',
+  matches: [] as any[]
+};
 
 export class IdeationGoatTools {
-  
+  private searchEngine = new CrossDomainSearchEngine();
+  private scaffolder = new ProjectScaffolder();
+  private workspaceAnalyzer = new WorkspaceAnalyzer();
+  private repoProfiler = new RepoProfiler();
+  private orchestrator = new WorkflowOrchestrator();
+
+  @Resource({
+    uri: 'ideation-goat://canvas',
+    name: 'Metaphor Canvas',
+    description: 'Returns the constellation node graph data for the last active search query.'
+  })
+  async getMetaphorCanvas(ctx: ExecutionContext) {
+    const query = lastSearch.query;
+    const mode = lastSearch.mode;
+    const matches = lastSearch.matches;
+
+    if (!query) {
+      return {
+        status: 'idle',
+        message: 'No query has been executed yet. Run search_knowledge_grid first.'
+      };
+    }
+
+    const nodes: any[] = [];
+    const edges: any[] = [];
+
+    // Add root query node
+    nodes.push({
+      id: 'root-query',
+      label: `Intent: '${query.slice(0, 25)}...'`,
+      type: 'intent',
+      weight: 1.0,
+      color: '#FF3366'
+    });
+
+    // Add matches nodes and edge links
+    for (let i = 0; i < matches.length; i++) {
+      const match = matches[i];
+      const nodeId = `node-${i}`;
+      const source = match.source || 'Unknown Source';
+      const title = match.title || `Result ${i}`;
+
+      const isCs = ['github', 'cs.', 'computer science'].some((domain) =>
+        source.toLowerCase().includes(domain)
+      );
+      const nodeColor = isCs ? '#3399FF' : '#33FF99';
+
+      nodes.push({
+        id: nodeId,
+        label: `[${source}] ${title}`,
+        type: 'result',
+        category: match.category || match.domain || 'General',
+        color: nodeColor
+      });
+
+      const cognitiveTension = isCs ? 0.1 : 0.4 + i * 0.15;
+      edges.push({
+        source: 'root-query',
+        target: nodeId,
+        relationship_type: isCs ? 'precision_equivalent' : 'cross_domain_bridge',
+        tension_distance: cognitiveTension
+      });
+    }
+
+    return {
+      status: 'active',
+      last_query: query,
+      mode_executed: mode,
+      graph_topology: {
+        nodes,
+        edges
+      }
+    };
+  }
+
   @Tool({
     name: 'search_knowledge_grid',
     description: 'Advanced multi-domain index query engine. Interrogates codebases, academia, and patents.',
@@ -72,8 +116,45 @@ export class IdeationGoatTools {
       cognitive_distance: z.number().min(0.0).max(1.0).default(0.0).describe('Applied cognitive distance factor.')
     })
   })
-  async searchKnowledgeGrid(input: { query: string; mode: 'target' | 'discovery'; cognitive_distance: number }, ctx: ExecutionContext) {
-    return runPythonTool('search_knowledge_grid', input);
+  async searchKnowledgeGrid(
+    input: { query: string; mode: 'target' | 'discovery'; cognitive_distance: number },
+    ctx: ExecutionContext
+  ) {
+    console.log(`Executing search grid query via MCP: ${input.query}`);
+    const normalizedMode = input.mode.toLowerCase().trim();
+
+    if (normalizedMode === 'target') {
+      const matches = await this.searchEngine.searchTarget(input.query);
+      const synthesis = await this.searchEngine.synthesizeWhyFits(input.query, matches);
+      lastSearch = {
+        query: input.query,
+        mode: 'target',
+        matches
+      };
+      return {
+        status: 'success',
+        mode: 'target',
+        matches,
+        llm_synthesis: synthesis
+      };
+    } else if (normalizedMode === 'discovery') {
+      const matches = await this.searchEngine.searchDiscovery(input.query, input.cognitive_distance);
+      const synthesis = await this.searchEngine.synthesizeWhyFits(input.query, matches);
+      lastSearch = {
+        query: input.query,
+        mode: 'discovery',
+        matches
+      };
+      return {
+        status: 'success',
+        mode: 'discovery',
+        applied_cognitive_distance: input.cognitive_distance,
+        matches,
+        llm_synthesis: synthesis
+      };
+    } else {
+      return { status: 'error', message: `Invalid mode configuration parameter: '${input.mode}'` };
+    }
   }
 
   @Tool({
@@ -93,7 +174,48 @@ export class IdeationGoatTools {
     })
   })
   async breedConcepts(input: { concept_a: any; concept_b: any }, ctx: ExecutionContext) {
-    return runPythonTool('breed_concepts', input);
+    console.log('Parsing distinct structural topologies for breeding...');
+
+    const nameA = input.concept_a.title || 'Concept Alpha';
+    const descA = input.concept_a.description || '';
+    const domA = input.concept_a.domain_context || 'Unknown Domain';
+
+    const nameB = input.concept_b.title || 'Concept Beta';
+    const descB = input.concept_b.description || '';
+    const domB = input.concept_b.domain_context || 'Unknown Domain';
+
+    const hybridParadigm = `${nameB}-Infused ${nameA} Architecture`;
+
+    const graftMath =
+      descB.toLowerCase().includes('decay') || descA.toLowerCase().includes('cache')
+        ? 'S_c = \\sum_{i=1}^{n} (\\vec{V}_{A,i} \\cdot \\vec{V}_{B,i}) \\times \\gamma^{\\Delta t}'
+        : 'Q_f = \\lim_{\\Delta t \\to 0} \\frac{F_t(x + \\Delta x) - F_t(x)}{\\Delta x \\cdot \\lambda_{mesh}}';
+
+    const catalystPrompt =
+      'ACT AS A CONCEPTUAL TRANSLATOR.\n' +
+      `Synthesize the software structure of '${nameA}' in '${domA}' with the operational rules ` +
+      `of '${nameB}' in '${domB}'.\n` +
+      `Generate a robust markdown specification showing how the mechanics of Y (${nameB}) can be ` +
+      `grafted directly onto the software system of X (${nameA}) to unlock a new paradigm.`;
+
+    return {
+      status: 'hybridization_complete',
+      lineage: { parent_primary: nameA, parent_secondary: nameB },
+      synthesis_payload: {
+        paradigm_name: hybridParadigm,
+        structural_bridge: `Mapping the algorithmic/physical flow from ${domB} onto the system envelope of ${domA}.`,
+        hybrid_mechanics:
+          `Extract the dynamic rules from ${nameB} (${descB.slice(0, 80)}...) ` +
+          `and integrate them directly within the core state of ${nameA} (${descA.slice(0, 80)}...). ` +
+          'This strips traditional boundaries and replaces them with a cross-pollinated state model.',
+        mathematical_grafting_formula: graftMath,
+        critical_tradeoffs: [
+          'Increased latency/CPU calculation footprint during synchronization passes.',
+          'Non-linear debugging matrices created by cross-domain mapping interfaces.'
+        ],
+        bridge_catalyst_prompt: catalystPrompt
+      }
+    };
   }
 
   @Tool({
@@ -105,7 +227,75 @@ export class IdeationGoatTools {
     })
   })
   async bridgeCodeAndTheory(input: { code_snippet?: string; latex_formula?: string }, ctx: ExecutionContext) {
-    return runPythonTool('bridge_code_and_theory', input);
+    console.log('Initiating Algorithmic Translation sequence.');
+
+    if (input.code_snippet) {
+      const codeLower = input.code_snippet.toLowerCase();
+      let derivedMath = '';
+      let paradigm = '';
+      let queryTerms = '';
+
+      if (['cas', 'atomic', 'lock', 'thread', 'concurrent'].some((kw) => codeLower.includes(kw))) {
+        derivedMath = 'L_{sync} = \\min \\left( \\sum_{i=1}^{m} t_{wait,i} \\right) \\Rightarrow \\text{Linearizability Bound}';
+        paradigm = 'Lock-Free Concurrent Consistency and Linearizability Bounds';
+        queryTerms = 'linearizability concurrency';
+      } else if (['decay', 'evict', 'ttl', 'expire', 'time'].some((kw) => codeLower.includes(kw))) {
+        derivedMath = 'D_t = D_0 \\cdot e^{-\\lambda t}';
+        paradigm = 'Non-Linear Decay Processes and Poisson Eviction Models';
+        queryTerms = 'poisson eviction decay';
+      } else if (['route', 'graph', 'node', 'edge', 'mesh'].some((kw) => codeLower.includes(kw))) {
+        derivedMath = '\\nabla \\cdot \\vec{J} = -\\frac{\\partial \\rho}{\\partial t}';
+        paradigm = 'Graph-Theoretic Conservation Laws and Network Routing Optimization';
+        queryTerms = 'graph network optimization routing';
+      } else {
+        derivedMath = 'X_{t+1} = \\Phi(X_t, U_t) + w_t';
+        paradigm = 'Discrete Dynamical System State Models';
+        queryTerms = 'dynamical system state';
+      }
+
+      const papers = await this.searchEngine.arxiv_client.search(queryTerms, 3);
+
+      return {
+        translation_direction: 'Code to Theory',
+        derived_mathematical_paradigm: paradigm,
+        derived_latex_equations: derivedMath,
+        matching_theoretical_papers: papers.map((p: any) => ({
+          title: p.title,
+          url: p.url,
+          summary: p.summary ? `${p.summary.slice(0, 120)}...` : ''
+        }))
+      };
+    } else if (input.latex_formula) {
+      const formulaLower = input.latex_formula.toLowerCase();
+      let mappedRepos: any[] = [];
+      let logicBrief = '';
+
+      if (formulaLower.includes('e^{-') || formulaLower.includes('lambda') || formulaLower.includes('decay')) {
+        mappedRepos = this.searchEngine.mock_repos.filter((repo: any) => ['CacheGraphene', 'ShedValve'].includes(repo.title));
+        logicBrief = 'Implement using an atomic ticker index and thread-safe hash eviction buffers.';
+      } else if (formulaLower.includes('sum') || formulaLower.includes('vec') || formulaLower.includes('cdot')) {
+        mappedRepos = this.searchEngine.mock_repos.filter((repo: any) => ['CacheGraphene', 'SecurInvert'].includes(repo.title));
+        logicBrief = 'Implement using multi-dimensional array math (numpy/broadcasting) or hardware SIMD dot products.';
+      } else if (formulaLower.includes('lim') || formulaLower.includes('delta') || formulaLower.includes('mesh')) {
+        mappedRepos = this.searchEngine.mock_repos.filter((repo: any) => ['MeshFlow'].includes(repo.title));
+        logicBrief = 'Implement using priority queues and dynamic node graph weight adjustments.';
+      } else {
+        mappedRepos = this.searchEngine.mock_repos.slice(0, 2);
+        logicBrief = 'Implement using standard non-blocking queues or loop states.';
+      }
+
+      return {
+        translation_direction: 'Theory to Code',
+        detected_formula_envelope: input.latex_formula,
+        software_implementation_logic: logicBrief,
+        matched_codebase_templates: mappedRepos
+      };
+    } else {
+      return {
+        status: 'error',
+        message: 'Specify at least \'code_snippet\' or \'latex_formula\' to perform translation.'
+      };
+    }
   }
 
   @Tool({
@@ -116,7 +306,75 @@ export class IdeationGoatTools {
     })
   })
   async assessViability(input: { system_design: string }, ctx: ExecutionContext) {
-    return runPythonTool('assess_viability', input);
+    console.log('Initializing patent collision detection matrices.');
+
+    const designLower = input.system_design.toLowerCase();
+    const keywords = designLower
+      .split(/\s+/)
+      .filter((word) => word.length > 4 && !['system', 'design', 'database', 'platform', 'architecture', 'framework'].includes(word));
+
+    const searchQuery = keywords.length > 0 ? keywords.slice(0, 3).join(' ') : 'software';
+    const livePatents = await this.searchEngine.patent_client.search(searchQuery, 3);
+    const activeConflicts: any[] = [];
+
+    for (const pat of livePatents) {
+      let overlap = false;
+      const summaryLower = (pat.summary || '').toLowerCase();
+      const titleLower = (pat.title || '').toLowerCase();
+
+      for (const kw of keywords.slice(0, 5)) {
+        if (summaryLower.includes(kw) || titleLower.includes(kw)) {
+          overlap = true;
+          break;
+        }
+      }
+
+      if (overlap) {
+        activeConflicts.push({
+          patent_id: pat.patent_number !== 'Unknown' ? `US-${pat.patent_number}-B2` : 'US-Pending',
+          owner: pat.source || 'Patent Document',
+          title: pat.title,
+          infringement_risk: `Overlap found matching design parameters against patent claim: '${pat.summary ? pat.summary.slice(0, 150) : ''}...'`
+        });
+      }
+    }
+
+    if (activeConflicts.length === 0) {
+      if (designLower.includes('shard') || designLower.includes('partition')) {
+        activeConflicts.push({
+          patent_id: 'US-8910231-B2',
+          owner: 'Global Scale Infrastructure Corp',
+          title: 'Dynamic Data Sharding Vector Partition System',
+          infringement_risk: 'High overlap found if calculating data partition splits directly inside content vectors.'
+        });
+      } else if (designLower.includes('cache') || designLower.includes('evict')) {
+        activeConflicts.push({
+          patent_id: 'US-9876543-B2',
+          owner: 'MemoryTech Alliance',
+          title: 'Lock-based Eviction Buffers for Thread Pools',
+          infringement_risk: 'Medium overlap if using active locks during eviction checks in hardware thread pools.'
+        });
+      }
+    }
+
+    let evasionStrategy = '';
+    if (activeConflicts.length > 0) {
+      evasionStrategy =
+        `To evade conflict ${activeConflicts[0].patent_id}, decouple the design structure. ` +
+        'If sharding/partitioning, decouple database sharding from content attributes; implement a partition pattern mapped to time-slice write density. ' +
+        'If caching, build a lock-free buffer layer using atomic pointers and compute eviction targets off-thread.';
+    } else {
+      evasionStrategy =
+        'No high-probability patent conflicts detected in standard search vectors. ' +
+        'Recommended strategy is to design using open-source, GPL-compatible interfaces ' +
+        'and restrict data flow identifiers to temporal hashes.';
+    }
+
+    return {
+      analysis_status: 'complete',
+      identified_conflicts: activeConflicts,
+      defensive_evasion_vector: evasionStrategy
+    };
   }
 
   @Tool({
@@ -128,7 +386,13 @@ export class IdeationGoatTools {
     })
   })
   async searchAcademicPapers(input: { query: string; max_results: number }, ctx: ExecutionContext) {
-    return runPythonTool('search_academic_papers', input);
+    const arxivResults = await this.searchEngine.arxiv_client.search(input.query, input.max_results);
+    const scholarResults = await this.searchEngine.scholar_client.search(input.query, input.max_results);
+    return {
+      status: 'success',
+      arxiv_results: arxivResults,
+      scholar_results: scholarResults
+    };
   }
 
   @Tool({
@@ -140,7 +404,7 @@ export class IdeationGoatTools {
     })
   })
   async writeScaffoldingFiles(input: { synthesis_output: any; project_directory: string }, ctx: ExecutionContext) {
-    return runPythonTool('write_scaffolding_files', input);
+    return this.scaffolder.scaffold(input.synthesis_output, input.project_directory);
   }
 
   @Tool({
@@ -152,7 +416,7 @@ export class IdeationGoatTools {
     })
   })
   async verifyWorkspaceFit(input: { repo_name: string; workspace_path: string }, ctx: ExecutionContext) {
-    return runPythonTool('verify_workspace_fit', input);
+    return this.workspaceAnalyzer.verifyWorkspaceFit(input.repo_name, input.workspace_path);
   }
 
   @Tool({
@@ -164,7 +428,7 @@ export class IdeationGoatTools {
     })
   })
   async composeSolutionStack(input: { query: string; n_results: number }, ctx: ExecutionContext) {
-    return runPythonTool('compose_solution_stack', input);
+    return this.searchEngine.composeSolutionStack(input.query, input.n_results);
   }
 
   @Tool({
@@ -175,7 +439,7 @@ export class IdeationGoatTools {
     })
   })
   async getRepoHealth(input: { repo_name: string }, ctx: ExecutionContext) {
-    return runPythonTool('get_repo_health', input);
+    return this.repoProfiler.getRepoHealth(input.repo_name);
   }
 
   @Tool({
@@ -188,8 +452,16 @@ export class IdeationGoatTools {
       flash_limit_kb: z.number().default(1024.0).describe('Flash storage limits of board in KB.')
     })
   })
-  async profileRepoHardwareFootprint(input: { repo_name: string; target_hardware: string; sram_limit_kb: number; flash_limit_kb: number }, ctx: ExecutionContext) {
-    return runPythonTool('profile_repo_hardware_footprint', input);
+  async profileRepoHardwareFootprint(
+    input: { repo_name: string; target_hardware: string; sram_limit_kb: number; flash_limit_kb: number },
+    ctx: ExecutionContext
+  ) {
+    return this.repoProfiler.profileRepoHardwareFootprint(
+      input.repo_name,
+      input.target_hardware,
+      input.sram_limit_kb,
+      input.flash_limit_kb
+    );
   }
 
   @Tool({
@@ -201,7 +473,7 @@ export class IdeationGoatTools {
     })
   })
   async alignSystemArchitecture(input: { repo_name: string; workspace_path: string }, ctx: ExecutionContext) {
-    return runPythonTool('align_system_architecture', input);
+    return this.workspaceAnalyzer.alignSystemArchitecture(input.repo_name, input.workspace_path);
   }
 
   @Tool({
@@ -212,7 +484,20 @@ export class IdeationGoatTools {
     })
   })
   async analyzeWorkspaceAst(input: { workspace_path?: string }, ctx: ExecutionContext) {
-    return runPythonTool('analyze_workspace_ast', input);
+    const profile = await analyze_workspace(input.workspace_path);
+    if ('error' in profile) {
+      return `Error analyzing workspace AST: ${profile.error}`;
+    }
+
+    const output = [
+      `### 📁 Workspace AST & Architecture Profile (\`${profile.path}\`)`,
+      `- **Primary Language Detected:** \`${profile.primary_language}\``,
+      `- **All Languages Detected:** \`${profile.languages_detected ? profile.languages_detected.join(', ') : 'None'}\``,
+      `- **Frameworks & Core Libraries:** \`${profile.frameworks_detected ? profile.frameworks_detected.join(', ') : 'None'}\``,
+      `- **Build Tools:** \`${profile.build_tools ? profile.build_tools.join(', ') : 'None'}\``,
+      `- **Total Dependencies Parsed:** ${profile.dependencies.length} packages (\`${profile.dependencies.slice(0, 15).join(', ')}...\`)`
+    ];
+    return output.join('\n');
   }
 
   @Tool({
@@ -223,7 +508,28 @@ export class IdeationGoatTools {
     })
   })
   async checkRepoHealth(input: { repository: string }, ctx: ExecutionContext) {
-    return runPythonTool('check_repo_health', input);
+    const health = await analyze_repo_health(input.repository);
+    const metrics = health.metrics || {};
+
+    const output = [
+      `### 🩺 Open-Source Health & Tech Debt Audit (\`${metrics.repo || input.repository}\`)`,
+      `- **Composite Health Score:** \`${health.health_score || 0} / 100\` (${health.status || 'Unknown'})`,
+      `- **Known OSV.dev Vulnerabilities (CVEs):** \`${metrics.cve_count || 0}\``,
+      `- **Last Commit / Push Date:** \`${metrics.last_commit_date || 'Unknown'}\``,
+      `- **Active Contributors:** \`${metrics.contributors_count || 1}+\``,
+      `- **Archived Status:** \`${metrics.archived || false}\``
+    ];
+
+    if (health.flags && health.flags.length > 0) {
+      output.push('\n**⚠️ Risk Flags & Warnings:**');
+      for (const flag of health.flags) {
+        output.push(`- ${flag}`);
+      }
+    } else {
+      output.push('\n✅ *No critical security vulnerabilities or inactivity risks flagged.*');
+    }
+
+    return output.join('\n');
   }
 
   @Tool({
@@ -234,7 +540,26 @@ export class IdeationGoatTools {
     })
   })
   async checkEcosystemLockin(input: { repository: string }, ctx: ExecutionContext) {
-    return runPythonTool('check_ecosystem_lockin', input);
+    const lockin = await run_lockin_profiler(input.repository);
+
+    const output = [
+      `### 🌐 Ecosystem Lock-In & Portability Profile (\`${lockin.repo || input.repository}\`)`,
+      `- **Portability Grade:** \`${lockin.portability_grade || 'Unknown'}\``,
+      `- **Total Dependencies Evaluated:** \`${lockin.total_dependencies_checked || 0}\``,
+      `\n**Summary:**\n${lockin.summary || ''}`
+    ];
+
+    const lockedDeps = lockin.locked_dependencies || [];
+    if (lockedDeps.length > 0) {
+      output.push('\n**🔒 Locked Vendor Dependencies Found:**');
+      for (const ld of lockedDeps) {
+        output.push(`- **\`${ld.package}\`** → *${ld.vendor}* (${ld.reason})`);
+      }
+    } else {
+      output.push('\n✅ *Zero vendor lock-in dependencies found. Fully portable across self-hosted and multi-cloud environments.*');
+    }
+
+    return output.join('\n');
   }
 
   @Tool({
@@ -245,7 +570,35 @@ export class IdeationGoatTools {
     })
   })
   async analyzeRepoBugs(input: { repository: string }, ctx: ExecutionContext) {
-    return runPythonTool('analyze_repo_bugs', input);
+    const bugs = await run_bug_profiler(input.repository);
+    const totalAnalyzed = bugs.total_analyzed_issues || 0;
+
+    if (totalAnalyzed === 0) {
+      return `Could not fetch sufficient issue reports for \`${input.repository}\` (or repository has zero reported bugs).`;
+    }
+
+    const output = [
+      `### 🪲 Chronic Bug Profiler & Issue Landscape (\`${bugs.repo || input.repository}\`)`,
+      `- **Total Recent Issues Analyzed:** \`${totalAnalyzed}\``,
+      `- **Overall Bug Risk Level:** \`${bugs.risk_level || 'Unknown'}\`\n`,
+      '**⚡ Top High-Frequency Pitfalls:**'
+    ];
+
+    const pitfalls = bugs.top_pitfalls || [];
+    for (let idx = 0; idx < pitfalls.length; idx++) {
+      const p = pitfalls[idx];
+      const icon = p.is_critical ? '🚨' : 'ℹ️';
+      output.push(`${idx + 1}. ${icon} **${p.label}** (\`${p.percentage}%\` of recent bug reports - ${p.count} occurrences)`);
+      if (p.example_issues && p.example_issues.length > 0) {
+        output.push(`   *Examples:* "${p.example_issues[0]}"`);
+        if (p.example_issues.length > 1) {
+          output.push(`               "${p.example_issues[1]}"`);
+        }
+      }
+      output.push('');
+    }
+
+    return output.join('\n');
   }
 
   @Tool({
@@ -261,10 +614,103 @@ export class IdeationGoatTools {
     })
   })
   async orchestrateArchitecturalWorkflow(
-    input: { query: string; workspace_path: string; target_hardware?: string; sram_limit_kb: number; flash_limit_kb: number; scaffold_directory?: string },
+    input: {
+      query: string;
+      workspace_path: string;
+      target_hardware?: string;
+      sram_limit_kb: number;
+      flash_limit_kb: number;
+      scaffold_directory?: string;
+    },
     ctx: ExecutionContext
   ) {
-    return runPythonTool('orchestrate_architectural_workflow', input);
+    const res = await this.orchestrator.orchestrateWorkflow(
+      input.query,
+      input.workspace_path,
+      input.target_hardware || null,
+      input.sram_limit_kb,
+      input.flash_limit_kb,
+      input.scaffold_directory || null
+    );
+
+    const lines = [
+      '## 🐐 Unified Orchestrated Analysis Report',
+      `- **Intent Query:** \`${input.query}\``,
+      `- **Workspace Path:** \`${input.workspace_path}\``,
+      `- **Steps Completed:** ${res.steps_executed ? res.steps_executed.join(', ') : ''}`,
+      ''
+    ];
+
+    if (res.workspace_ast) {
+      const ast = res.workspace_ast;
+      lines.push(
+        '### 📁 Workspace AST Analysis',
+        `- **Primary Language:** \`${ast.primary_language || 'Unknown'}\``,
+        `- **Detected Languages:** \`${ast.languages_detected ? ast.languages_detected.join(', ') : ''}\``,
+        `- **Detected Frameworks:** \`${ast.frameworks_detected ? ast.frameworks_detected.join(', ') : ''}\``,
+        `- **Dependencies Count:** \`${ast.dependencies ? ast.dependencies.length : 0}\``,
+        ''
+      );
+    } else if (res.workspace_ast_error) {
+      lines.push('### 📁 Workspace AST Analysis', `⚠️ **Error:** ${res.workspace_ast_error}`, '');
+    }
+
+    if (res.matched_repositories) {
+      lines.push('### 🔍 Target Repository Matches');
+      const matches = res.matched_repositories.slice(0, 3);
+      for (let idx = 0; idx < matches.length; idx++) {
+        const match = matches[idx];
+        lines.push(`${idx + 1}. **${match.title || 'Unknown'}** (${match.source || 'Unknown'})`);
+        if (match.description) {
+          lines.push(`   *Description:* ${match.description}`);
+        }
+      }
+      lines.push('');
+    }
+
+    if (res.solution_stack_blueprint) {
+      lines.push('### 🏗️ Solution Stack Blueprint', res.solution_stack_blueprint, '');
+    }
+
+    if (res.repo_health) {
+      const healthData = res.repo_health;
+      lines.push('### 🩺 Pulse & Health Telemetry', healthData.scorecard || '', '');
+    }
+
+    if (res.ecosystem_lockin) {
+      const lockin = res.ecosystem_lockin;
+      lines.push(
+        '### 🔒 Ecosystem Lock-in Profile',
+        `- **Portability Grade:** \`${lockin.portability_grade || 'Unknown'}\``,
+        `- **Summary:** ${lockin.summary || ''}`,
+        ''
+      );
+    }
+
+    if (res.bug_profile) {
+      const bp = res.bug_profile;
+      lines.push(
+        '### 🪲 Chronic Bug Profiler',
+        `- **Risk Level:** \`${bp.risk_level || 'Unknown'}\``,
+        `- **Total Issues Analyzed:** \`${bp.total_analyzed_issues || 0}\``,
+        ''
+      );
+    }
+
+    if (res.workspace_alignment) {
+      const wa = res.workspace_alignment;
+      lines.push('### 🏛️ Workspace Alignment & Fit', wa.compatibility_scorecard || '', wa.alignment_report || '', '');
+    }
+
+    if (res.edge_hardware_profile) {
+      lines.push('### 🎛️ Edge Hardware Profile', res.edge_hardware_profile, '');
+    }
+
+    if (res.scaffold_generation) {
+      lines.push('### 🚀 Scaffold Generation', `Code skeleton generated successfully inside: \`${input.scaffold_directory}\``, '');
+    }
+
+    return lines.join('\n');
   }
 
   @Tool({
@@ -275,8 +721,11 @@ export class IdeationGoatTools {
       estimated_traffic: z.number().int().describe('Estimated monthly request volume.')
     })
   })
-  async forecastLiveCosts(input: { provider: 'AWS' | 'Vercel' | 'Supabase' | 'Neon'; estimated_traffic: number }, ctx: ExecutionContext) {
-    return runPythonTool('forecast_live_costs', input);
+  async forecastLiveCosts(
+    input: { provider: 'AWS' | 'Vercel' | 'Supabase' | 'Neon'; estimated_traffic: number },
+    ctx: ExecutionContext
+  ) {
+    return forecastDeploymentCosts(input.provider, input.estimated_traffic);
   }
 
   @Tool({
@@ -288,7 +737,11 @@ export class IdeationGoatTools {
     })
   })
   async autoHealParameters(input: { raw_arguments: any; expected_schema: any }, ctx: ExecutionContext) {
-    return runPythonTool('auto_heal_parameters', input);
+    const result = healParameterSchema(input.raw_arguments, input.expected_schema);
+    return {
+      healed_arguments: result.healed_params,
+      self_correction_audit_log: Object.values(result.audit_log)
+    };
   }
 
   @Tool({
@@ -300,7 +753,7 @@ export class IdeationGoatTools {
     })
   })
   async verifyIdentityToken(input: { token: string; required_permission?: string }, ctx: ExecutionContext) {
-    return runPythonTool('verify_identity_token', input);
+    return verifySandboxIdentity(input.token, input.required_permission);
   }
 
   @Tool({
@@ -311,7 +764,7 @@ export class IdeationGoatTools {
     })
   })
   async profileDependencyInjection(input: { workspace_path: string }, ctx: ExecutionContext) {
-    return runPythonTool('profile_dependency_injection', input);
+    return profileWorkspaceDi(input.workspace_path);
   }
 
   @Tool({
@@ -323,7 +776,16 @@ export class IdeationGoatTools {
     })
   })
   async generateDockerScaffolding(input: { workspace_path: string; target_framework: string }, ctx: ExecutionContext) {
-    return runPythonTool('generate_docker_scaffolding', input);
+    try {
+      const files = this.scaffolder.generateDockerFiles(input.workspace_path, input.target_framework);
+      return {
+        status: 'success',
+        message: `Generated Docker container files in ${input.workspace_path}`,
+        files_created: files
+      };
+    } catch (err: any) {
+      return { status: 'error', message: `Docker scaffolding failed: ${err.message}` };
+    }
   }
 
   @Tool({
@@ -334,8 +796,11 @@ export class IdeationGoatTools {
       halt_on_severity: z.enum(['low', 'medium', 'high', 'critical']).default('high').describe('Gate severity limit.')
     })
   })
-  async scanLocalCves(input: { workspace_path: string; halt_on_severity: 'low' | 'medium' | 'high' | 'critical' }, ctx: ExecutionContext) {
-    return runPythonTool('scan_local_cves', input);
+  async scanLocalCves(
+    input: { workspace_path: string; halt_on_severity: 'low' | 'medium' | 'high' | 'critical' },
+    ctx: ExecutionContext
+  ) {
+    return scanWorkspaceSecurityCves(input.workspace_path, input.halt_on_severity);
   }
 
   @Tool({
@@ -346,7 +811,7 @@ export class IdeationGoatTools {
     })
   })
   async searchGitlabRepos(input: { query: string }, ctx: ExecutionContext) {
-    return runPythonTool('search_gitlab_repos', input);
+    return this.orchestrator.searchGitLab(input.query);
   }
 
   @Tool({
@@ -357,7 +822,7 @@ export class IdeationGoatTools {
     })
   })
   async auditHackerNewsTrends(input: { query: string }, ctx: ExecutionContext) {
-    return runPythonTool('audit_hacker_news_trends', input);
+    return this.orchestrator.auditHackerNewsSentiment(input.query);
   }
 }
 
