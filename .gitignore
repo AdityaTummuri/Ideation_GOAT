@@ -62,3 +62,18 @@ tmp*/
 
 # Node modules
 node_modules/
+
+# IDE and AI Agent configurations
+.agents/
+.antigravity/
+.claude/
+.codex/
+.copilot/
+.cursor/
+.gemini/
+.opencode/
+
+# Web App build/cache directories
+.next/
+.nuxt/
+.cache/
