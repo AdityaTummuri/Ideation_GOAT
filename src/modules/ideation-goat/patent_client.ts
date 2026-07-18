@@ -58,7 +58,7 @@ export class PatentClient {
           throw new Error(`HTTP Error: ${response.status} ${response.statusText}`);
         }
 
-        const responseData = (await response.ok ? response.json() : {}) as any;
+        const responseData = (await response.json()) as any;
 
         // Check for error in response
         const errorMsg = responseData.search_metadata?.error;

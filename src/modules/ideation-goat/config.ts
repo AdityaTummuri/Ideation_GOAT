@@ -6,11 +6,11 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 export class Settings {
-  public static readonly CHROMA_PATH = process.env.CHROMA_PATH || './chroma_data';
-  public static readonly CHROMADB_COLLECTION = process.env.CHROMADB_COLLECTION || 'github_repos';
+  public static readonly CHROMA_PATH = process.env.CHROMA_PATH || process.env.CHROMA_DB_PATH || './chroma_data';
+  public static readonly CHROMADB_COLLECTION = process.env.CHROMADB_COLLECTION || process.env.CHROMADB_COLLECTION_NAME || 'github_repos';
   public static readonly ARXIV_TIMEOUT = parseInt(process.env.ARXIV_TIMEOUT || '8', 10);
   public static readonly ARXIV_MAX_RESULTS = parseInt(process.env.ARXIV_MAX_RESULTS || '10', 10);
-  public static readonly GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+  public static readonly GITHUB_TOKEN = process.env.GITHUB_TOKEN || process.env.GITHUB_API_TOKEN;
 
   // Cloud Vector DB & LLM Configurations
   public static readonly PINECONE_API_KEY = process.env.PINECONE_API_KEY;
@@ -18,8 +18,8 @@ export class Settings {
   public static readonly PINECONE_INDEX_URL = process.env.PINECONE_INDEX_URL;
   public static readonly SUPABASE_URL = process.env.SUPABASE_URL;
   public static readonly SUPABASE_KEY = process.env.SUPABASE_KEY;
-  public static readonly GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-  public static readonly OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+  public static readonly GEMINI_API_KEY = process.env.GEMINI_API_KEY || (process.env.LLM_PROVIDER === 'gemini' || !process.env.LLM_PROVIDER ? process.env.LLM_API_KEY : undefined);
+  public static readonly OPENAI_API_KEY = process.env.OPENAI_API_KEY || (process.env.LLM_PROVIDER === 'openai' ? process.env.LLM_API_KEY : undefined);
   public static readonly GOOGLE_SCHOLAR_API_KEY = process.env.GOOGLE_SCHOLAR_API_KEY;
   public static readonly GOOGLE_PATENTS_API_KEY = process.env.GOOGLE_PATENTS_API_KEY;
   public static readonly UNPAYWALL_EMAIL = process.env.UNPAYWALL_EMAIL;

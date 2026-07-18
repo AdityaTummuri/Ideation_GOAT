@@ -178,7 +178,7 @@ export class RepoProfiler {
     } else {
       output.push('- 📈 **Commits (last 30 days):** *Failed to fetch*');
     }
-    output.push(`- 🤝 **PR Activity (last 30 days):** ${openPrs} Open, {closedPrs} Closed`);
+    output.push(`- 🤝 **PR Activity (last 30 days):** ${openPrs} Open, ${closedPrs} Closed`);
     output.push(`- 💾 **Codebase Size:** ${(size / 1024).toFixed(2)} MB`);
     output.push('');
 

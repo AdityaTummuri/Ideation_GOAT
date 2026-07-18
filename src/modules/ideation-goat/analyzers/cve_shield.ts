@@ -53,8 +53,9 @@ export function getVulnSeverity(vuln: any): 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICA
     const scoreStr = severityItem.score || '';
     if (typeStr.includes('CVSS')) {
       try {
-        const scoreVal = scoreStr.includes('/') ? scoreStr.split('/').pop() : scoreStr;
-        const score = parseFloat(scoreVal);
+        const scoreStrNormal = String(scoreStr);
+        const scoreVal = scoreStrNormal.includes('/') ? scoreStrNormal.split('/').pop() : scoreStrNormal;
+        const score = parseFloat(scoreVal || '');
         if (!isNaN(score)) {
           if (score >= 9.0) return 'CRITICAL';
           if (score >= 7.0) return 'HIGH';
